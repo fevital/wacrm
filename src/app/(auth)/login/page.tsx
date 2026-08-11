@@ -1,5 +1,5 @@
 "use client";
-
+import Image from "next/image";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -82,7 +82,13 @@ function LoginPageInner() {
             {inviteToken ? (
               <UsersRound className="h-6 w-6 text-primary" />
             ) : (
-              <MessageSquare className="h-6 w-6 text-primary" />
+             <Image
+  src="/logo-vital.png"
+  alt="Vital Corretora"
+  width={48}
+  height={48}
+  className="h-12 w-12 object-contain"
+/>
             )}
           </div>
           <CardTitle className="text-xl text-foreground">
