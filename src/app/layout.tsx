@@ -22,7 +22,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "wacrm",
+    default: "Vital Corretora",
     template: "%s — Vital Corretora",
   },
   description: "CRM",
