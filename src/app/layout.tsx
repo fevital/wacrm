@@ -23,16 +23,16 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: {
     default: "wacrm",
-    template: "%s — wacrm",
+    template: "%s — Vital Corretora",
   },
-  description: "Self-hostable CRM template for WhatsApp.",
+  description: "CRM",
   robots: {
     index: false,
     follow: false,
   },
   icons: {
-    icon: [{ url: "/icon" }],
-  },
+  icon: [{ url: "/logo-vital.png" }],
+},
   formatDetection: {
     email: false,
     address: false,
