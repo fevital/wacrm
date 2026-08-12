@@ -195,15 +195,17 @@ function buildButtonComponent(
       };
     }
    case 'QUICK_REPLY': {
-  if (!override || !override.trim()) {
-    return null;
+  const payload = override?.trim() || button.text?.trim();
+
+  if (!payload) {
+    throw new Error(`Quick reply button #${index + 1} requires a payload.`);
   }
 
   return {
     type: 'button',
     sub_type: 'quick_reply',
     index: String(index),
-    parameters: [{ type: 'payload', payload: override }],
+    parameters: [{ type: 'payload', payload }],
   };
 }
     case 'PHONE_NUMBER':
