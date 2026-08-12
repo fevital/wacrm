@@ -194,16 +194,18 @@ function buildButtonComponent(
         parameters: [{ type: 'coupon_code', coupon_code: code }],
       };
     }
-    case 'QUICK_REPLY': {
-      // Only included when the caller explicitly overrides the
-      // payload (rare — usually QR buttons use their default text).
-      return {
-        type: 'button',
-        sub_type: 'quick_reply',
-        index: String(index),
-        parameters: [{ type: 'payload', payload: override! }],
-      };
-    }
+   case 'QUICK_REPLY': {
+  if (!override || !override.trim()) {
+    return null;
+  }
+
+  return {
+    type: 'button',
+    sub_type: 'quick_reply',
+    index: String(index),
+    parameters: [{ type: 'payload', payload: override }],
+  };
+}
     case 'PHONE_NUMBER':
       // PHONE_NUMBER buttons never accept send-time params per Meta —
       // return null even if an override snuck through.
