@@ -15,7 +15,7 @@ import {
 import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
-type VariableType = 'static' | 'field' | 'custom_field';
+type VariableType = 'static' | 'field' | 'custom_field' | 'csv_field';
 
 interface VariableMapping {
   type: VariableType;
@@ -26,6 +26,7 @@ interface Step3Props {
   template: MessageTemplate;
   variables: Record<string, VariableMapping>;
   onUpdate: (variables: Record<string, VariableMapping>) => void;
+  csvContacts?: { phone: string; name?: string; fields?: Record<string, string> }[];
   /** Media URL for an IMAGE/VIDEO/DOCUMENT header, when the template has one. */
   headerMediaUrl: string;
   onHeaderMediaUrlChange: (url: string) => void;
@@ -71,6 +72,7 @@ export function Step3Personalize({
   template,
   variables,
   onUpdate,
+  csvContacts,
   headerMediaUrl,
   onHeaderMediaUrlChange,
   onNext,
@@ -84,7 +86,13 @@ export function Step3Personalize({
     Map<string, string>
   >(new Map());
   const [loadingPreview, setLoadingPreview] = useState(true);
-
+const csvFieldNames = Array.from(
+  new Set(
+    (csvContacts ?? []).flatMap((contact) =>
+      Object.keys(contact.fields ?? {})
+    )
+  )
+);
   // Load user's custom fields + a representative contact for the
   // live preview. Fall back to sample data if no contacts exist yet.
   useEffect(() => {
@@ -214,20 +222,24 @@ export function Step3Personalize({
             company: contact.company,
           };
           replacement = fieldMap[mapping.value] ?? placeholder;
-        } else if (mapping.type === 'custom_field' && mapping.value) {
-          replacement = customValues.get(mapping.value) || placeholder;
-        }
+       } else if (mapping.type === 'custom_field' && mapping.value) {
+  replacement = customValues.get(mapping.value) || placeholder;
+} else if (mapping.type === 'csv_field' && mapping.value) {
+  replacement =
+    csvContacts?.[0]?.fields?.[mapping.value] || placeholder;
+}
       }
       text = text.replaceAll(placeholder, replacement);
     }
     return text;
   }, [
-    template.body_text,
-    variables,
-    placeholders,
-    firstContact,
-    firstContactCustomValues,
-  ]);
+  template.body_text,
+  variables,
+  placeholders,
+  firstContact,
+  firstContactCustomValues,
+  csvContacts,
+]);
 
   const previewLabel = firstContact
     ? firstContact.name || firstContact.phone
@@ -330,6 +342,11 @@ export function Step3Personalize({
                         <SelectItem value="custom_field">
                           {t('personalize.typeCustom')}
                         </SelectItem>
+                        {csvFieldNames.length > 0 && (
+  <SelectItem value="csv_field">
+    Coluna do CSV
+  </SelectItem>
+)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -365,7 +382,26 @@ export function Step3Personalize({
                           ))}
                         </SelectContent>
                       </Select>
-                    ) : (
+                   ) : mapping.type === 'csv_field' ? (
+  <Select
+    value={mapping.value || undefined}
+    onValueChange={(val) =>
+      updateVariable(key, { value: val || '' })
+    }
+  >
+    <SelectTrigger className="w-full border-border bg-muted text-foreground">
+      <SelectValue placeholder="Selecione uma coluna do CSV..." />
+    </SelectTrigger>
+
+    <SelectContent className="border-border bg-popover">
+      {csvFieldNames.map((fieldName) => (
+        <SelectItem key={fieldName} value={fieldName}>
+          {fieldName}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
+) : (
                       <Select
                         value={mapping.value || undefined}
                         onValueChange={(val) =>

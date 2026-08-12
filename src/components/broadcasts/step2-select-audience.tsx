@@ -29,7 +29,7 @@ interface AudienceConfig {
   type: AudienceType;
   tagIds?: string[];
   customField?: CustomFieldFilter;
-  csvContacts?: { phone: string; name?: string }[];
+ csvContacts?: { phone: string; name?: string; fields?: Record<string, string> }[];
   excludeTagIds?: string[];
 }
 
@@ -275,9 +275,10 @@ async function handleCsvFile(file: File | null) {
       .toLowerCase()
   }
 
-  const headers = parseCsvLine(lines[0]).map(normalizeHeader)
+  const headers = parseCsvLine(lines[0]).map((header) => header.trim())
+  const normalizedHeaders = headers.map(normalizeHeader)
 
-  const phoneIndex = headers.findIndex((header) =>
+  const phoneIndex = normalizedHeaders.findIndex((header) =>
     [
       'telefone',
       'phone',
@@ -288,19 +289,22 @@ async function handleCsvFile(file: File | null) {
     ].includes(header)
   )
 
-  const nameIndex = headers.findIndex((header) =>
+  const nameIndex = normalizedHeaders.findIndex((header) =>
     ['nome', 'name'].includes(header)
   )
 
   if (phoneIndex === -1) {
-    window.alert(
-      'O CSV precisa ter uma coluna chamada Telefone.'
-    )
+    window.alert('O CSV precisa ter uma coluna chamada Telefone.')
     onUpdate({ ...audience, csvContacts: [] })
     return
   }
 
-  const contacts: { phone: string; name?: string }[] = []
+  const contacts: {
+    phone: string
+    name?: string
+    fields?: Record<string, string>
+  }[] = []
+
   const seenPhones = new Set<string>()
 
   for (const line of lines.slice(1)) {
@@ -314,9 +318,17 @@ async function handleCsvFile(file: File | null) {
 
     seenPhones.add(phone)
 
+    const fields: Record<string, string> = {}
+
+    headers.forEach((header, index) => {
+      if (!header) return
+      fields[header] = (columns[index] ?? '').trim()
+    })
+
     contacts.push({
       phone,
       ...(name ? { name } : {}),
+      fields,
     })
   }
 
@@ -324,18 +336,20 @@ async function handleCsvFile(file: File | null) {
     ...audience,
     csvContacts: contacts,
   })
-}
-  const isValid =
-    audience.type === 'all' ||
-    (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) ||
-    (audience.type === 'custom_field' &&
-      !!audience.customField?.fieldId &&
-      audience.customField.value.length > 0) ||
-    (audience.type === 'csv' &&
-      audience.csvContacts &&
-      audience.csvContacts.length > 0);
+  }
+const isValid =
+  audience.type === 'all' ||
+  (audience.type === 'tags' &&
+    audience.tagIds &&
+    audience.tagIds.length > 0) ||
+  (audience.type === 'custom_field' &&
+    !!audience.customField?.fieldId &&
+    audience.customField.value.length > 0) ||
+  (audience.type === 'csv' &&
+    audience.csvContacts &&
+    audience.csvContacts.length > 0)
 
-  return (
+return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-foreground">{t('selectAudience.title')}</h2>

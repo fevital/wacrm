@@ -21,7 +21,7 @@ export interface AudienceConfig {
   type: 'all' | 'tags' | 'custom_field' | 'csv';
   tagIds?: string[];
   customField?: CustomFieldFilter;
-  csvContacts?: { phone: string; name?: string }[];
+  csvContacts?: { phone: string; name?: string; fields?: Record<string, string> }[];
   /** Contacts carrying any of these tags are subtracted from the result. */
   excludeTagIds?: string[];
 }
@@ -36,7 +36,8 @@ export interface AudienceConfig {
 export type VariableMapping =
   | { type: 'static'; value: string }
   | { type: 'field'; value: string }
-  | { type: 'custom_field'; value: string };
+  | { type: 'custom_field'; value: string }
+  | { type: 'csv_field'; value: string };
 
 interface BroadcastPayload {
   name: string;
@@ -97,6 +98,7 @@ export function resolveVariables(
   variables: Record<string, VariableMapping>,
   contact: Contact,
   customValues?: Map<string, string>,
+  csvFields?: Record<string, string>,
 ): string[] {
   // Keys are typically "1","2",... — numeric-aware sort keeps
   // {{1}} before {{10}}.
@@ -121,8 +123,15 @@ export function resolveVariables(
       return fieldMap[v.value] ?? '';
     }
 
-    // custom_field
-    return customValues?.get(v.value) ?? '';
+    if (v.type === 'custom_field') {
+  return customValues?.get(v.value) ?? '';
+}
+
+if (v.type === 'csv_field') {
+  return csvFields?.[v.value] ?? '';
+}
+
+return '';
   });
 }
 
@@ -475,6 +484,13 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
                   payload.variables,
                   r.contact,
                   customValueIndex.get(r.contact.id),
+                  payload.audience.type === 'csv'
+  ? payload.audience.csvContacts?.find(
+      (row) =>
+        row.phone.replace(/\D/g, '') ===
+        r.contact!.phone!.replace(/\D/g, '')
+    )?.fields
+  : undefined,
                 )
               : [],
             ...(messageParams ? { messageParams } : {}),

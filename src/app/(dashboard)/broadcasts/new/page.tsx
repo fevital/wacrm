@@ -41,7 +41,7 @@ export default function NewBroadcastPage() {
     excludeTagIds?: string[];
   }>({ type: 'all' });
   const [variables, setVariables] = useState<
-    Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>
+Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value: string }>
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
@@ -209,6 +209,7 @@ export default function NewBroadcastPage() {
               template={template}
               variables={variables}
               onUpdate={setVariables}
+              csvContacts={audience.csvContacts}
               headerMediaUrl={headerMediaUrl}
               onHeaderMediaUrlChange={setHeaderMediaUrl}
               onNext={() => setCurrentStep(3)}
