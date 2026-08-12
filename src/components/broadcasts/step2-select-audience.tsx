@@ -240,7 +240,15 @@ export function Step2SelectAudience({
 async function handleCsvFile(file: File | null) {
   if (!file) return
 
-  const text = await file.text()
+  const bytes = await file.arrayBuffer()
+
+let text: string
+
+try {
+  text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+} catch {
+  text = new TextDecoder('windows-1252').decode(bytes)
+}
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
