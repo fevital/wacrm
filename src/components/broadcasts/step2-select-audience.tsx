@@ -237,7 +237,94 @@ export function Step2SelectAudience({
     };
     onUpdate({ ...audience, customField: { ...prev, ...patch } });
   }
+async function handleCsvFile(file: File | null) {
+  if (!file) return
 
+  const text = await file.text()
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (lines.length < 2) {
+    window.alert('O CSV está vazio ou não possui dados.')
+    onUpdate({ ...audience, csvContacts: [] })
+    return
+  }
+
+  const separator = lines[0].includes(';') ? ';' : ','
+
+  function parseCsvLine(line: string) {
+    const regex = new RegExp(
+      `${separator}(?=(?:[^"]*"[^"]*")*[^"]*$)`
+    )
+
+    return line.split(regex).map((value) =>
+      value
+        .trim()
+        .replace(/^"|"$/g, '')
+        .replace(/""/g, '"')
+    )
+  }
+
+  function normalizeHeader(value: string) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase()
+  }
+
+  const headers = parseCsvLine(lines[0]).map(normalizeHeader)
+
+  const phoneIndex = headers.findIndex((header) =>
+    [
+      'telefone',
+      'phone',
+      'celular',
+      'whatsapp',
+      'numero',
+      'numero de telefone',
+    ].includes(header)
+  )
+
+  const nameIndex = headers.findIndex((header) =>
+    ['nome', 'name'].includes(header)
+  )
+
+  if (phoneIndex === -1) {
+    window.alert(
+      'O CSV precisa ter uma coluna chamada Telefone.'
+    )
+    onUpdate({ ...audience, csvContacts: [] })
+    return
+  }
+
+  const contacts: { phone: string; name?: string }[] = []
+  const seenPhones = new Set<string>()
+
+  for (const line of lines.slice(1)) {
+    const columns = parseCsvLine(line)
+
+    const phone = (columns[phoneIndex] ?? '').replace(/\D/g, '')
+    const name =
+      nameIndex >= 0 ? (columns[nameIndex] ?? '').trim() : ''
+
+    if (!phone || seenPhones.has(phone)) continue
+
+    seenPhones.add(phone)
+
+    contacts.push({
+      phone,
+      ...(name ? { name } : {}),
+    })
+  }
+
+  onUpdate({
+    ...audience,
+    csvContacts: contacts,
+  })
+}
   const isValid =
     audience.type === 'all' ||
     (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) ||
@@ -390,7 +477,30 @@ export function Step2SelectAudience({
           )}
         </div>
       )}
+{audience.type === 'csv' && (
+  <div className="rounded-xl border border-border bg-card/50 p-4">
+    <label className="mb-2 block text-sm font-medium text-foreground">
+      Importar arquivo CSV
+    </label>
 
+    <input
+      type="file"
+      accept=".csv,text/csv"
+      onChange={(e) => handleCsvFile(e.target.files?.[0] ?? null)}
+      className="block w-full cursor-pointer rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground"
+    />
+
+    <p className="mt-2 text-xs text-muted-foreground">
+      O arquivo deve conter uma coluna Telefone. A coluna Nome é opcional.
+    </p>
+
+    {audience.csvContacts && audience.csvContacts.length > 0 && (
+      <p className="mt-2 text-sm font-medium text-foreground">
+        {audience.csvContacts.length} contatos carregados.
+      </p>
+    )}
+  </div>
+)}
       {/* Exclude list — applies regardless of audience type */}
       <div className="rounded-xl border border-border bg-card/50 p-4">
         <div className="mb-3 flex items-center gap-2">
