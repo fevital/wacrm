@@ -996,17 +996,17 @@ function InteractiveReplyConfig({
 }) {
   const ids = (config?.reply_ids as string[] | undefined) ?? []
   // Same local-draft-then-commit pattern as KeywordMatchConfig so
-  // commas + spaces survive keystrokes.
-  const [draft, setDraft] = useState(ids.join(", "))
+  // Use semicolon as separator so commas can be part of button text.
+const [draft, setDraft] = useState(ids.join("; "))
 
-  function commit() {
-    const parsed = draft
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-    setDraft(parsed.join(", "))
-    onChange({ ...config, reply_ids: parsed })
-  }
+function commit() {
+  const parsed = draft
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  setDraft(parsed.join("; "))
+  onChange({ ...config, reply_ids: parsed })
+}
 
   return (
     <div>

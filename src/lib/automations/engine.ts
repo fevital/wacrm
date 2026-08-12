@@ -569,19 +569,24 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         .select('default_currency')
         .eq('id', args.automation.account_id)
         .maybeSingle()
-      await db.from('deals').insert({
-        // Tenancy + audit, same split as automation_logs above.
-        account_id: args.automation.account_id,
-        user_id: args.automation.user_id,
-        pipeline_id: cfg.pipeline_id,
-        stage_id: cfg.stage_id,
-        contact_id: args.contactId,
-        title: interpolate(cfg.title, args),
-        value: cfg.value ?? 0,
-        currency: acct?.default_currency ?? 'USD',
-        status: 'open',
-      })
-      return 'deal created'
+      const { error: dealError } = await db.from('deals').insert({
+  // Tenancy + audit, same split as automation_logs above.
+  account_id: args.automation.account_id,
+  user_id: args.automation.user_id,
+  pipeline_id: cfg.pipeline_id,
+  stage_id: cfg.stage_id,
+  contact_id: args.contactId,
+  title: interpolate(cfg.title, args),
+  value: cfg.value ?? 0,
+  currency: acct?.default_currency ?? 'USD',
+  status: 'open',
+})
+
+if (dealError) {
+  throw new Error(`create_deal failed: ${dealError.message}`)
+}
+
+return 'deal created'
     }
 
     case 'send_webhook': {
