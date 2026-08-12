@@ -438,7 +438,7 @@ console.log(
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify(body),
-  }
+  })
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
