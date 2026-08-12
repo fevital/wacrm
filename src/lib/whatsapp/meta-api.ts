@@ -427,7 +427,10 @@ export async function sendTemplateMessage(
   if (contextMessageId) {
     body.context = { message_id: contextMessageId }
   }
-
+console.log(
+  'WACRM_TEMPLATE_PAYLOAD',
+  JSON.stringify(body, null, 2)
+)
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -435,7 +438,7 @@ export async function sendTemplateMessage(
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify(body),
-  })
+  }
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
