@@ -202,23 +202,26 @@ export default function BroadcastDetailPage() {
   function handleExport() {
     if (!broadcast) return;
     const header = [
-      t('table.contact'),
-      t('table.phone'),
-      t('table.status'),
-      t('table.sent'),
-      t('table.delivered'),
-      t('table.read'),
-      t('table.error'),
-    ];
-    const rows = recipients.map((r) => [
-      r.contact?.name ?? '',
-      r.contact?.phone ?? '',
-      r.status,
-      r.sent_at ?? '',
-      r.delivered_at ?? '',
-      r.read_at ?? '',
-      r.error_message ?? '',
-    ]);
+  t('table.contact'),
+  t('table.phone'),
+  t('table.status'),
+  'Status de prospecção',
+  t('table.sent'),
+  t('table.delivered'),
+  t('table.read'),
+  t('table.error'),
+];
+
+const rows = recipients.map((r) => [
+  r.contact?.name ?? '',
+  r.contact?.phone ?? '',
+  r.status,
+  r.contact?.do_not_contact === true ? 'Não prospectar' : 'Ativo',
+  r.sent_at ?? '',
+  r.delivered_at ?? '',
+  r.read_at ?? '',
+  r.error_message ?? '',
+]);
     const csv = toCsv([header, ...rows]);
     const safeName = broadcast.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
     downloadBlob(`broadcast-${safeName}-${broadcastId.slice(0, 8)}.csv`, csv);

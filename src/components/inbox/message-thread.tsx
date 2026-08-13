@@ -646,20 +646,65 @@ export function MessageThread({
   );
 
   const handleStatusChange = useCallback(
-    async (status: ConversationStatus) => {
-      if (!conversation) return;
+  async (status: ConversationStatus) => {
+    if (!conversation) return;
 
-      const supabase = createClient();
-      await supabase
-        .from("conversations")
-        .update({ status })
-        .eq("id", conversation.id);
+    const supabase = createClient();
 
-      onStatusChange(conversation.id, status);
-    },
-    [conversation, onStatusChange]
+    const { error } = await supabase
+      .from("conversations")
+      .update({ status })
+      .eq("id", conversation.id);
+
+    if (error) {
+      console.error("Failed to update conversation status:", error);
+      toast.error("Não foi possível atualizar a conversa.");
+      return;
+    }
+
+    onStatusChange(conversation.id, status);
+  },
+  [conversation, onStatusChange]
+);
+const handleDeleteConversation = useCallback(async () => {
+  if (!conversation || !contact) return;
+
+  const supabase = createClient();
+
+  const { error: contactError } = await supabase
+    .from("contacts")
+    .update({ do_not_contact: true })
+    .eq("id", contact.id);
+
+  if (contactError) {
+    console.error("Failed to mark contact as do not contact:", contactError);
+    toast.error("Não foi possível marcar o contato como não prospectar.");
+    return;
+  }
+
+  const { error: conversationError } = await supabase
+    .from("conversations")
+    .update({ status: "closed" })
+    .eq("id", conversation.id);
+
+  if (conversationError) {
+    console.error("Failed to close conversation:", conversationError);
+
+    await supabase
+      .from("contacts")
+      .update({ do_not_contact: false })
+      .eq("id", contact.id);
+
+    toast.error("Não foi possível excluir a conversa.");
+    return;
+  }
+
+  onStatusChange(conversation.id, "closed");
+
+  toast.success(
+    "Conversa excluída e contato marcado como não prospectar."
   );
-
+}, [conversation, contact, onStatusChange]);
   const handleOpenTemplates = useCallback(() => {
     setTemplateModalOpen(true);
   }, []);
@@ -992,7 +1037,22 @@ export function MessageThread({
               />
             </button>
           )}
+<button
+  type="button"
+  onClick={() => {
+    const confirmed = window.confirm(
+      "Excluir esta conversa e marcar este contato como Não prospectar?\n\nO histórico será preservado, mas este contato não deverá receber novas prospecções."
+    );
 
+    if (confirmed) {
+      void handleDeleteConversation();
+    }
+  }}
+  className="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium text-red-500 transition-colors hover:bg-red-500/10 hover:text-red-600"
+  title="Excluir conversa e marcar como não prospectar"
+>
+  Excluir conversa
+</button>
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(

@@ -110,6 +110,7 @@ export interface Contact {
   avatar_url?: string;
   created_at: string;
   updated_at: string;
+  do_not_contact?: boolean;
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
    *  Inbox conversation list, for tag filtering). Absent otherwise. */
   tags?: Tag[];
