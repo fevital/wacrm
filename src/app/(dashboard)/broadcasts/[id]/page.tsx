@@ -204,46 +204,44 @@ export default function BroadcastDetailPage() {
 
   const supabase = createClient();
 
-  // Busca o status atual dos contatos no momento da exportação.
-  // Fazemos em lotes para funcionar também em campanhas grandes.
-  const contactIds = Array.from(
-    new Set(
-      recipients
-        .map((r) => r.contact_id)
-        .filter((id): id is string => Boolean(id))
-    )
-  );
+  // Busca novamente os destinatários da campanha no momento da exportação,
+  // já trazendo os dados atuais do contato pelo relacionamento.
+  const { data: exportRecipients, error } = await supabase
+    .from("broadcast_recipients")
+    .select(`
+      *,
+      contact:contacts(*)
+    `)
+    .eq("broadcast_id", broadcastId);
 
-  const doNotContactById = new Map<string, boolean>();
-
-  for (let i = 0; i < contactIds.length; i += 200) {
-    const batchIds = contactIds.slice(i, i + 200);
-
-    const { data, error } = await supabase
-      .from("contacts")
-      .select("id, do_not_contact")
-      .in("id", batchIds);
-
-    if (error) {
-      console.error("Failed to load contact prospecting status:", error);
-      toast.error("Não foi possível carregar o status de prospecção.");
-      return;
-    }
-
-    for (const contact of data ?? []) {
-      doNotContactById.set(
-        contact.id,
-        contact.do_not_contact === true
-      );
-    }
+  if (error) {
+    console.error("Failed to load recipients for export:", error);
+    toast.error("Não foi possível carregar os destinatários para exportação.");
+    return;
   }
 
+  const currentRecipients = exportRecipients ?? [];
+
+  const getSourceData = (
+    sourceData: unknown
+  ): Record<string, unknown> => {
+    if (
+      sourceData &&
+      typeof sourceData === "object" &&
+      !Array.isArray(sourceData)
+    ) {
+      return sourceData as Record<string, unknown>;
+    }
+
+    return {};
+  };
+
   // Recupera todas as colunas existentes no CSV original.
-  // A ordem da primeira linha é preservada.
+  // A ordem da primeira linha encontrada é preservada.
   const sourceHeaders = Array.from(
     new Set(
-      recipients.flatMap((r) =>
-        Object.keys(r.source_data ?? {})
+      currentRecipients.flatMap((recipient) =>
+        Object.keys(getSourceData(recipient.source_data))
       )
     )
   );
@@ -263,39 +261,37 @@ export default function BroadcastDetailPage() {
     t("table.error"),
   ];
 
-  const rows = recipients.map((r) => {
+  const rows = currentRecipients.map((recipient) => {
+    const sourceData = getSourceData(recipient.source_data);
+
     const originalValues = hasOriginalCsvData
-      ? sourceHeaders.map(
-          (headerName) => r.source_data?.[headerName] ?? ""
-        )
+      ? sourceHeaders.map((headerName) => sourceData[headerName] ?? "")
       : [
-          r.contact?.name ?? "",
-          r.contact?.phone ?? "",
+          recipient.contact?.name ?? "",
+          recipient.contact?.phone ?? "",
         ];
 
-    const doNotContact =
-      r.contact_id !== null &&
-      doNotContactById.get(r.contact_id) === true;
+    // O valor é lido diretamente do JOIN feito no momento da exportação.
+    const doNotContact = recipient.contact?.do_not_contact === true;
 
     return [
       ...originalValues,
-      r.status,
+      recipient.status,
       doNotContact ? "Não prospectar" : "Ativo",
-      r.sent_at ?? "",
-      r.delivered_at ?? "",
-      r.read_at ?? "",
-      r.error_message ?? "",
+      recipient.sent_at ?? "",
+      recipient.delivered_at ?? "",
+      recipient.read_at ?? "",
+      recipient.error_message ?? "",
     ];
   });
 
   const csv = toCsv([header, ...rows]);
 
-  // BOM UTF-8: faz o Excel do Windows reconhecer corretamente
-  // ç, ã, ê, ó etc.
+  // BOM UTF-8: faz o Excel do Windows reconhecer corretamente os acentos.
   const csvForExcel = "\uFEFF" + csv;
 
   const safeName = broadcast.name
-    .replace(/[^a-z0-9-_]+/gi, "-")
+    .replace(/[^a-z0-9_-]+/gi, "-")
     .toLowerCase();
 
   downloadBlob(
