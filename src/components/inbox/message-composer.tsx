@@ -183,7 +183,46 @@ export function MessageComposer({
   const recorderRef = useRef<import("opus-recorder").default | null>(null);
   const cancelledRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([]);
+const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
+const [microphoneDialogOpen, setMicrophoneDialogOpen] = useState(false);
 
+useEffect(() => {
+  const savedMicrophoneId = window.localStorage.getItem(
+    "wacrm_selected_microphone"
+  );
+
+  if (savedMicrophoneId) {
+    setSelectedMicrophoneId(savedMicrophoneId);
+  }
+}, []);
+const loadMicrophones = useCallback(async () => {
+  if (
+    !navigator.mediaDevices?.getUserMedia ||
+    !navigator.mediaDevices?.enumerateDevices
+  ) {
+    toast.error("Seu navegador não permite selecionar o microfone.");
+    return;
+  }
+
+  try {
+    const permissionStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+    });
+
+    permissionStream.getTracks().forEach((track) => track.stop());
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter(
+      (device) => device.kind === "audioinput"
+    );
+
+    setMicrophones(audioInputs);
+    setMicrophoneDialogOpen(true);
+  } catch {
+    toast.error("Não foi possível acessar os microfones disponíveis.");
+  }
+}, []);
   // Viewers (read-only role) can browse the inbox but never send.
   // For solo users this is always true — single-owner accounts pass
   // every capability — so the disabled branch is a no-op there.
@@ -459,12 +498,19 @@ export function MessageComposer({
       // keeping it out of the main bundle.
       const { default: Recorder } = await import("opus-recorder");
       const recorder = new Recorder({
-        encoderPath: OPUS_ENCODER_PATH,
-        numberOfChannels: 1,
-        encoderApplication: 2048, // VOIP — tuned for speech
-        encoderSampleRate: 48000,
-        streamPages: false, // one callback with the complete file on stop
-      });
+  encoderPath: OPUS_ENCODER_PATH,
+  numberOfChannels: 1,
+  encoderApplication: 2048, // VOIP — tuned for speech
+  encoderSampleRate: 48000,
+  streamPages: false, // one callback with the complete file on stop
+  ...(selectedMicrophoneId
+    ? {
+        mediaTrackConstraints: {
+          deviceId: { exact: selectedMicrophoneId },
+        },
+      }
+    : {}),
+});
       cancelledRef.current = false;
       recorder.ondataavailable = (bytes) => {
         if (cancelledRef.current) return;
@@ -480,7 +526,13 @@ export function MessageComposer({
       recorderRef.current = null;
       toast.error("Microphone access denied or unavailable.");
     }
-  }, [inputsDisabled, busy, recording, finalizeRecording]);
+ }, [
+  inputsDisabled,
+  busy,
+  recording,
+  finalizeRecording,
+  selectedMicrophoneId,
+]);
 
   const stopRecording = useCallback(() => {
     clearTimer();
@@ -662,13 +714,70 @@ export function MessageComposer({
                 <FileText className="mr-2 h-4 w-4" />
                 {t("document")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
+              <DropdownMenuItem onClick={() => void loadMicrophones()}>
                 <Mic className="mr-2 h-4 w-4" />
                 {t("voiceNote")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+<Dialog
+  open={microphoneDialogOpen}
+  onOpenChange={setMicrophoneDialogOpen}
+>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>Escolher microfone</DialogTitle>
+    </DialogHeader>
 
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant={selectedMicrophoneId === "" ? "secondary" : "outline"}
+        className="w-full justify-start"
+        onClick={() => {
+          setSelectedMicrophoneId("");
+          window.localStorage.removeItem("wacrm_selected_microphone");
+        }}
+      >
+        Padrão do sistema
+      </Button>
+
+      {microphones.map((microphone, index) => (
+        <Button
+          key={microphone.deviceId}
+          type="button"
+          variant={
+            selectedMicrophoneId === microphone.deviceId
+              ? "secondary"
+              : "outline"
+          }
+          className="w-full justify-start"
+          onClick={() => {
+            setSelectedMicrophoneId(microphone.deviceId);
+            window.localStorage.setItem(
+              "wacrm_selected_microphone",
+              microphone.deviceId
+            );
+          }}
+        >
+          {microphone.label || `Microfone ${index + 1}`}
+        </Button>
+      ))}
+    </div>
+
+    <DialogFooter>
+      <Button
+        type="button"
+        onClick={() => {
+          setMicrophoneDialogOpen(false);
+          void startRecording();
+        }}
+      >
+        Gravar
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
           {/* + menu — interactive messages + quick replies. Gated on the
               24h window like free-form text (interactive requires it). */}
           <DropdownMenu>
