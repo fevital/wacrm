@@ -422,6 +422,7 @@ export interface BroadcastRecipient {
    * Added in migration 003.
    */
   whatsapp_message_id?: string;
+  source_data?: Record<string, string>;
   created_at: string;
   contact?: Contact;
 }

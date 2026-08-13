@@ -218,7 +218,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         .in('tag_id', audience.excludeTagIds);
       const excludedIds = new Set((excludeRows ?? []).map((r) => r.contact_id));
       contacts = contacts.filter((c) => !excludedIds.has(c.id));
-    }
+    }// Never prospect contacts explicitly marked as do-not-contact.
+contacts = contacts.filter((contact) => contact.do_not_contact !== true);
 
     return contacts;
   }
@@ -405,11 +406,23 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
       // ── Step 3: Insert recipient rows ─────────────────────────────
       setProgress(20);
-      const recipientRows = contacts.map((contact) => ({
-        broadcast_id: broadcast.id,
-        contact_id: contact.id,
-        status: 'pending' as const,
-      }));
+      const recipientRows = contacts.map((contact) => {
+  const csvRow =
+    payload.audience.type === 'csv'
+      ? payload.audience.csvContacts?.find(
+          (row) =>
+            row.phone.replace(/\D/g, '') ===
+            contact.phone.replace(/\D/g, '')
+        )
+      : undefined;
+
+  return {
+    broadcast_id: broadcast.id,
+    contact_id: contact.id,
+    status: 'pending' as const,
+    source_data: csvRow?.fields ?? {},
+  };
+});
 
       for (let i = 0; i < recipientRows.length; i += INSERT_BATCH_SIZE) {
         const batch = recipientRows.slice(i, i + INSERT_BATCH_SIZE);

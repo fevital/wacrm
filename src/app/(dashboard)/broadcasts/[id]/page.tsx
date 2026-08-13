@@ -199,33 +199,110 @@ export default function BroadcastDetailPage() {
     [recipients, statusFilter],
   );
 
-  function handleExport() {
-    if (!broadcast) return;
-    const header = [
-  t('table.contact'),
-  t('table.phone'),
-  t('table.status'),
-  'Status de prospecção',
-  t('table.sent'),
-  t('table.delivered'),
-  t('table.read'),
-  t('table.error'),
-];
+  async function handleExport() {
+  if (!broadcast) return;
 
-const rows = recipients.map((r) => [
-  r.contact?.name ?? '',
-  r.contact?.phone ?? '',
-  r.status,
-  r.contact?.do_not_contact === true ? 'Não prospectar' : 'Ativo',
-  r.sent_at ?? '',
-  r.delivered_at ?? '',
-  r.read_at ?? '',
-  r.error_message ?? '',
-]);
-    const csv = toCsv([header, ...rows]);
-    const safeName = broadcast.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
-    downloadBlob(`broadcast-${safeName}-${broadcastId.slice(0, 8)}.csv`, csv);
+  const supabase = createClient();
+
+  // Busca o status atual dos contatos no momento da exportação.
+  // Fazemos em lotes para funcionar também em campanhas grandes.
+  const contactIds = Array.from(
+    new Set(
+      recipients
+        .map((r) => r.contact_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+
+  const doNotContactById = new Map<string, boolean>();
+
+  for (let i = 0; i < contactIds.length; i += 200) {
+    const batchIds = contactIds.slice(i, i + 200);
+
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, do_not_contact")
+      .in("id", batchIds);
+
+    if (error) {
+      console.error("Failed to load contact prospecting status:", error);
+      toast.error("Não foi possível carregar o status de prospecção.");
+      return;
+    }
+
+    for (const contact of data ?? []) {
+      doNotContactById.set(
+        contact.id,
+        contact.do_not_contact === true
+      );
+    }
   }
+
+  // Recupera todas as colunas existentes no CSV original.
+  // A ordem da primeira linha é preservada.
+  const sourceHeaders = Array.from(
+    new Set(
+      recipients.flatMap((r) =>
+        Object.keys(r.source_data ?? {})
+      )
+    )
+  );
+
+  // Campanhas antigas não possuem source_data.
+  const hasOriginalCsvData = sourceHeaders.length > 0;
+
+  const header = [
+    ...(hasOriginalCsvData
+      ? sourceHeaders
+      : [t("table.contact"), t("table.phone")]),
+    t("table.status"),
+    "Status de prospecção",
+    t("table.sent"),
+    t("table.delivered"),
+    t("table.read"),
+    t("table.error"),
+  ];
+
+  const rows = recipients.map((r) => {
+    const originalValues = hasOriginalCsvData
+      ? sourceHeaders.map(
+          (headerName) => r.source_data?.[headerName] ?? ""
+        )
+      : [
+          r.contact?.name ?? "",
+          r.contact?.phone ?? "",
+        ];
+
+    const doNotContact =
+      r.contact_id !== null &&
+      doNotContactById.get(r.contact_id) === true;
+
+    return [
+      ...originalValues,
+      r.status,
+      doNotContact ? "Não prospectar" : "Ativo",
+      r.sent_at ?? "",
+      r.delivered_at ?? "",
+      r.read_at ?? "",
+      r.error_message ?? "",
+    ];
+  });
+
+  const csv = toCsv([header, ...rows]);
+
+  // BOM UTF-8: faz o Excel do Windows reconhecer corretamente
+  // ç, ã, ê, ó etc.
+  const csvForExcel = "\uFEFF" + csv;
+
+  const safeName = broadcast.name
+    .replace(/[^a-z0-9-_]+/gi, "-")
+    .toLowerCase();
+
+  downloadBlob(
+    `broadcast-${safeName}-${broadcastId.slice(0, 8)}.csv`,
+    csvForExcel
+  );
+}
 
   async function handleDelete() {
     setDeleting(true);
