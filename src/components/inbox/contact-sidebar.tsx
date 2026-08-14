@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -29,13 +30,14 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
-  const { accountId } = useAuth();
+  const { accountId, defaultCurrency } = useAuth();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [qualifying, setQualifying] = useState(false);
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
@@ -119,6 +121,114 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     setAddingNote(false);
   }, [contact, newNote, accountId]);
 
+  const handleQualify = useCallback(async () => {
+    if (!contact || !accountId || qualifying) return;
+
+    setQualifying(true);
+    const supabase = createClient();
+
+    try {
+      const { data: existingDeal, error: dealError } = await supabase
+        .from("deals")
+        .select("*")
+        .eq("contact_id", contact.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (dealError) throw dealError;
+
+      let pipelineId = existingDeal?.pipeline_id as string | undefined;
+
+      if (!pipelineId) {
+        const { data: pipelines, error: pipelineError } = await supabase
+          .from("pipelines")
+          .select("id, name")
+          .order("created_at", { ascending: true });
+
+        if (pipelineError) throw pipelineError;
+
+        const pipeline =
+          pipelines?.find(
+            (item) => item.name.trim().toLowerCase() === "sales pipeline",
+          ) ?? pipelines?.[0];
+
+        if (!pipeline) {
+          toast.error(tSidebar("qualifyPipelineMissing"));
+          return;
+        }
+
+        pipelineId = pipeline.id;
+      }
+
+      const { data: qualifiedStage, error: stageError } = await supabase
+        .from("pipeline_stages")
+        .select("*")
+        .eq("pipeline_id", pipelineId)
+        .ilike("name", "Qualified")
+        .limit(1)
+        .maybeSingle();
+
+      if (stageError) throw stageError;
+
+      if (!qualifiedStage) {
+        toast.error(tSidebar("qualifyStageMissing"));
+        return;
+      }
+
+      if (existingDeal) {
+        const { data: movedDeal, error: moveError } = await supabase
+          .from("deals")
+          .update({ stage_id: qualifiedStage.id })
+          .eq("id", existingDeal.id)
+          .select("*, stage:pipeline_stages(*)")
+          .single();
+
+        if (moveError) throw moveError;
+
+        setDeals((current) =>
+          current.map((deal) =>
+            deal.id === movedDeal.id ? (movedDeal as Deal) : deal,
+          ),
+        );
+        toast.success(tSidebar("qualifyMoved"));
+        return;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error("User is not authenticated");
+
+      const { data: createdDeal, error: createError } = await supabase
+        .from("deals")
+        .insert({
+          user_id: user.id,
+          account_id: accountId,
+          pipeline_id: pipelineId,
+          stage_id: qualifiedStage.id,
+          contact_id: contact.id,
+          title: contact.name || contact.phone,
+          value: 0,
+          currency: defaultCurrency,
+          status: "open",
+        })
+        .select("*, stage:pipeline_stages(*)")
+        .single();
+
+      if (createError) throw createError;
+
+      setDeals((current) => [createdDeal as Deal, ...current]);
+      toast.success(tSidebar("qualifyCreated"));
+    } catch (error) {
+      console.error("Failed to qualify contact:", error);
+      toast.error(tSidebar("qualifyError"));
+    } finally {
+      setQualifying(false);
+    }
+  }, [contact, accountId, defaultCurrency, qualifying, tSidebar]);
+
   if (!contact) {
     return (
       <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
@@ -177,6 +287,14 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               </div>
             )}
           </div>
+
+          <Button
+            className="mt-3 w-full"
+            onClick={handleQualify}
+            disabled={qualifying}
+          >
+            {qualifying ? tSidebar("qualifying") : tSidebar("qualify")}
+          </Button>
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />

@@ -286,7 +286,14 @@
       "deals": "Deals",
       "noTags": "No tags",
       "noDeals": "No deals",
-      "addNotePlaceholder": "Add a note..."
+      "addNotePlaceholder": "Add a note...",
+      "qualify": "Qualified",
+      "qualifying": "Qualifying...",
+      "qualifyMoved": "Deal moved to Qualified.",
+      "qualifyCreated": "Deal created in Qualified.",
+      "qualifyError": "Could not qualify the contact.",
+      "qualifyPipelineMissing": "No pipeline was found.",
+      "qualifyStageMissing": "The Qualified stage was not found in this pipeline."
     },
     "aiBanner": {
       "pausedTitle": "AI assistant is paused here",

@@ -286,7 +286,14 @@
       "deals": "Negócios",
       "noTags": "Sem etiquetas",
       "noDeals": "Sem negócios",
-      "addNotePlaceholder": "Adicionar uma nota..."
+      "addNotePlaceholder": "Adicionar uma nota...",
+      "qualify": "Qualificado",
+      "qualifying": "Qualificando...",
+      "qualifyMoved": "Negócio movido para Qualified.",
+      "qualifyCreated": "Negócio criado em Qualified.",
+      "qualifyError": "Não foi possível qualificar o contato.",
+      "qualifyPipelineMissing": "Nenhum funil foi encontrado.",
+      "qualifyStageMissing": "A etapa Qualified não foi encontrada neste funil."
     },
     "aiBanner": {
       "pausedTitle": "O assistente de IA está pausado nesta conversa",
