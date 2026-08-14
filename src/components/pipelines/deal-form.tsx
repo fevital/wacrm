@@ -30,6 +30,9 @@ import {
   MessageSquare,
   DollarSign,
   Loader2,
+  Paperclip,
+  Download,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -42,6 +45,14 @@ interface DealFormProps {
   stages: PipelineStage[];
   defaultStageId?: string;
   onSaved: () => void;
+}
+
+interface DealAttachment {
+  id: string;
+  file_name: string;
+  file_path: string;
+  size_bytes: number;
+  created_at: string;
 }
 
 export function DealForm({
@@ -59,6 +70,7 @@ export function DealForm({
 
   const [title, setTitle] = useState("");
   const [value, setValue] = useState("");
+  const [commissionPercentage, setCommissionPercentage] = useState("");
   const [currency, setCurrency] = useState(defaultCurrency);
   const [contactId, setContactId] = useState("");
   const [stageId, setStageId] = useState("");
@@ -75,6 +87,8 @@ export function DealForm({
   const [statusAction, setStatusAction] = useState<DealStatus | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [attachments, setAttachments] = useState<DealAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   // Reset the form fields every time the sheet opens or its input
   // props change. This is a legitimate prop-driven sync; the rule is
@@ -86,6 +100,7 @@ export function DealForm({
     if (deal) {
       setTitle(deal.title);
       setValue(String(deal.value ?? ""));
+      setCommissionPercentage(String(deal.commission_percentage ?? 0));
       setCurrency(deal.currency || defaultCurrency);
       // contact_id is nullable when the contact has been deleted
       // (migration 004: ON DELETE SET NULL). "" means "no selection".
@@ -97,6 +112,7 @@ export function DealForm({
     } else {
       setTitle("");
       setValue("");
+      setCommissionPercentage("");
       setCurrency(defaultCurrency);
       setContactId("");
       setStageId(defaultStageId || stages[0]?.id || "");
@@ -151,6 +167,105 @@ export function DealForm({
     };
   }, [open, contactId, supabase]);
 
+  useEffect(() => {
+    if (!open || !deal) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAttachments([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("deal_attachments")
+        .select("*")
+        .eq("deal_id", deal.id)
+        .order("created_at", { ascending: false });
+      if (!cancelled) setAttachments((data ?? []) as DealAttachment[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, deal, supabase]);
+
+  async function handleAttachmentUpload(file: File) {
+    if (!deal || !accountId || uploadingAttachment) return;
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error(t("attachmentTooLarge"));
+      return;
+    }
+
+    setUploadingAttachment(true);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) {
+      setUploadingAttachment(false);
+      toast.error(t("toastNotSignedIn"));
+      return;
+    }
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    const filePath = `account-${accountId}/${deal.id}/${crypto.randomUUID()}-${safeName}`;
+    const { error: uploadError } = await supabase.storage
+      .from("deal-attachments")
+      .upload(filePath, file, { contentType: file.type || undefined });
+
+    if (uploadError) {
+      setUploadingAttachment(false);
+      toast.error(t("attachmentUploadFailed"));
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("deal_attachments")
+      .insert({
+        account_id: accountId,
+        deal_id: deal.id,
+        uploaded_by: user.id,
+        file_name: file.name,
+        file_path: filePath,
+        mime_type: file.type || null,
+        size_bytes: file.size,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      await supabase.storage.from("deal-attachments").remove([filePath]);
+      toast.error(t("attachmentUploadFailed"));
+    } else {
+      setAttachments((current) => [data as DealAttachment, ...current]);
+      toast.success(t("attachmentUploaded"));
+    }
+    setUploadingAttachment(false);
+  }
+
+  async function handleOpenAttachment(attachment: DealAttachment) {
+    const { data, error } = await supabase.storage
+      .from("deal-attachments")
+      .createSignedUrl(attachment.file_path, 60);
+    if (error || !data?.signedUrl) {
+      toast.error(t("attachmentOpenFailed"));
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function handleDeleteAttachment(attachment: DealAttachment) {
+    const { error } = await supabase
+      .from("deal_attachments")
+      .delete()
+      .eq("id", attachment.id);
+    if (error) {
+      toast.error(t("attachmentDeleteFailed"));
+      return;
+    }
+    await supabase.storage.from("deal-attachments").remove([attachment.file_path]);
+    setAttachments((current) => current.filter((item) => item.id !== attachment.id));
+    toast.success(t("attachmentDeleted"));
+  }
+
   async function handleSave() {
     if (!title.trim() || !contactId || !stageId) {
       toast.error(t("toastRequired"));
@@ -161,6 +276,10 @@ export function DealForm({
     const payload = {
       title: title.trim(),
       value: parseFloat(value) || 0,
+      commission_percentage: Math.min(
+        100,
+        Math.max(0, parseFloat(commissionPercentage) || 0),
+      ),
       currency,
       contact_id: contactId,
       pipeline_id: pipelineId,
@@ -326,6 +445,42 @@ export function DealForm({
             </div>
 
             <div className="grid gap-2">
+              <Label className="text-muted-foreground">
+                {t("commissionPercentage")}
+              </Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={commissionPercentage}
+                  onChange={(e) => setCommissionPercentage(e.target.value)}
+                  placeholder="0"
+                  className="border-border bg-muted pr-8 text-foreground"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                  %
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t("expectedCommissionPreview", {
+                  value: new Intl.NumberFormat(undefined, {
+                    style: "currency",
+                    currency,
+                  }).format(
+                    (parseFloat(value) || 0) *
+                      (Math.min(
+                        100,
+                        Math.max(0, parseFloat(commissionPercentage) || 0),
+                      ) /
+                        100),
+                  ),
+                })}
+              </p>
+            </div>
+
+            <div className="grid gap-2">
               <Label className="text-muted-foreground">{t("expectedCloseDate")}</Label>
               <Input
                 type="date"
@@ -374,6 +529,54 @@ export function DealForm({
                 placeholder={t("notesPlaceholder")}
                 className="min-h-[100px] border-border bg-muted text-foreground"
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-2 text-muted-foreground">
+                <Paperclip className="h-4 w-4" />
+                {t("attachments")}
+              </Label>
+              {deal ? (
+                <>
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted px-3 py-3 text-sm text-muted-foreground hover:text-foreground">
+                    {uploadingAttachment ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    {uploadingAttachment ? t("attachmentUploading") : t("attachmentAdd")}
+                    <input
+                      type="file"
+                      className="hidden"
+                      disabled={uploadingAttachment}
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.txt"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void handleAttachmentUpload(file);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  <div className="space-y-2">
+                    {attachments.map((attachment) => (
+                      <div key={attachment.id} className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2">
+                        <Paperclip className="h-4 w-4 shrink-0 text-primary" />
+                        <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={attachment.file_name}>
+                          {attachment.file_name}
+                        </span>
+                        <button type="button" onClick={() => void handleOpenAttachment(attachment)} title={t("attachmentOpen")}>
+                          <Download className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                        </button>
+                        <button type="button" onClick={() => void handleDeleteAttachment(attachment)} title={t("attachmentDelete")}>
+                          <Trash2 className="h-4 w-4 text-red-400 hover:text-red-300" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">{t("attachmentSaveFirst")}</p>
+              )}
             </div>
 
             {deal && (

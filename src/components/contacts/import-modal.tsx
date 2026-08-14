@@ -141,6 +141,7 @@ export function ImportModal({
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{
     imported: number;
+    updated: number;
     skipped: number;
     failed: number;
     tagsAssigned: number;
@@ -219,6 +220,7 @@ export function ImportModal({
         throw new Error('Your profile is not linked to an account.');
 
       let imported = 0;
+      let updated = 0;
       let skipped = 0;
       let failed = 0;
 
@@ -230,27 +232,27 @@ export function ImportModal({
       //    generated `phone_normalized` column (migration 022) → Set.
       const { data: existingRows } = await supabase
         .from('contacts')
-        .select('phone_normalized')
+        .select('id, phone_normalized')
         .eq('account_id', accountId);
-      const existing = new Set(
+      const existing = new Map(
         (existingRows ?? [])
-          .map(
-            (r) => (r as { phone_normalized: string | null }).phone_normalized
+          .filter(
+            (r): r is { id: string; phone_normalized: string } =>
+              !!r.phone_normalized
           )
-          .filter((p): p is string => !!p)
+          .map((r) => [r.phone_normalized, r.id])
       );
 
-      const toInsert = unique.filter((row) => {
-        if (existing.has(normalizeKey(row.phone))) {
-          skipped++;
-          return false;
-        }
-        return true;
-      });
+      const existingMatches = unique.filter((row) =>
+        existing.has(normalizeKey(row.phone))
+      );
+      const toInsert = unique.filter(
+        (row) => !existing.has(normalizeKey(row.phone))
+      );
 
       // 3) Resolve tag names → ids (admin+ may auto-create missing tags).
       //    Skip the round-trip when the import carries no tag names.
-      const allTagNames = toInsert.flatMap((row) => row.tagNames);
+      const allTagNames = unique.flatMap((row) => row.tagNames);
       let tagIdByKey = new Map<string, string>();
       let skippedNames: string[] = [];
       if (allTagNames.length > 0) {
@@ -263,6 +265,33 @@ export function ImportModal({
       }
 
       const tagAssignments: ContactTagAssignment[] = [];
+
+      // Existing phone numbers are updated instead of silently skipped.
+      // This associates spreadsheet names with phone-only contacts.
+      for (const row of existingMatches) {
+        const contactId = existing.get(normalizeKey(row.phone));
+        if (!contactId) continue;
+
+        const contactPatch: Record<string, string> = {};
+        if (row.name) contactPatch.name = row.name;
+        if (row.email) contactPatch.email = row.email;
+        if (row.company) contactPatch.company = row.company;
+
+        if (Object.keys(contactPatch).length > 0) {
+          const { error } = await supabase
+            .from('contacts')
+            .update(contactPatch)
+            .eq('id', contactId);
+          if (error) failed++;
+          else updated++;
+        } else {
+          skipped++;
+        }
+
+        if (row.tagNames.length > 0) {
+          tagAssignments.push({ contactId, tagNames: row.tagNames });
+        }
+      }
 
       // 4) Batch insert the genuinely-new rows in chunks of 50. The DB
       //    unique index is the backstop: a 23505 (race, or a format
@@ -341,11 +370,12 @@ export function ImportModal({
         toast.warning(t('toastTagsWarning'));
       }
 
-      setResult({ imported, skipped, failed, tagsAssigned });
+      setResult({ imported, updated, skipped, failed, tagsAssigned });
       if (imported > 0) {
         toast.success(t('toastImported', { count: imported }));
-        onImported();
       }
+      if (updated > 0) toast.success(t('toastUpdated', { count: updated }));
+      if (imported > 0 || updated > 0) onImported();
       if (tagsAssigned > 0) {
         toast.success(t('toastTagsAssigned', { count: tagsAssigned }));
       }
@@ -572,6 +602,12 @@ export function ImportModal({
                   <div className="text-primary flex items-center gap-1.5 text-sm">
                     <CheckCircle className="size-4 shrink-0" />
                     {t('resultImported', { count: result.imported })}
+                  </div>
+                )}
+                {result.updated > 0 && (
+                  <div className="flex items-center gap-1.5 text-sm text-blue-400">
+                    <CheckCircle className="size-4 shrink-0" />
+                    {t('resultUpdated', { count: result.updated })}
                   </div>
                 )}
                 {result.tagsAssigned > 0 && (

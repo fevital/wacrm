@@ -30,6 +30,8 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const t = useTranslations("Pipelines.card");
   const contactLabel = deal.contact?.name || deal.contact?.phone || t("noContact");
   const assigneeLabel = deal.assignee?.full_name || null;
+  const commissionPercentage = Number(deal.commission_percentage || 0);
+  const expectedCommission = Number(deal.value || 0) * (commissionPercentage / 100);
 
   return (
     <button
@@ -90,6 +92,13 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
             {formatDate(deal.expected_close_date)}
           </span>
         )}
+      </div>
+
+      <div className="mt-1 text-[11px] text-muted-foreground">
+        {t("commission", {
+          percentage: commissionPercentage.toLocaleString(),
+          value: formatCurrency(expectedCommission, deal.currency),
+        })}
       </div>
 
       {assigneeLabel && (

@@ -368,6 +368,7 @@ export interface Deal {
   assigned_to?: string;
   title: string;
   value: number;
+  commission_percentage?: number;
   currency?: string;
   notes?: string;
   expected_close_date?: string;
