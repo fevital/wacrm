@@ -196,7 +196,7 @@ export interface Notification {
   /** Recipient — the agent this notification is for. */
   user_id: string;
   type: NotificationType;
-  conversation_id?: string;
+  conversation_id?: string | null;
   contact_id?: string;
   /** Who triggered it. Null when an automation/system assigned it. */
   actor_user_id?: string;

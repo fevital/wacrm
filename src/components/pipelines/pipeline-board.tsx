@@ -28,6 +28,9 @@ interface PipelineBoardProps {
   onDealMoved: (dealId: string, newStageId: string) => void;
   onAddDeal: (stageId: string) => void;
   onEditDeal: (deal: Deal) => void;
+  selectionMode?: boolean;
+  selectedDealIds?: Set<string>;
+  onToggleDealSelection?: (dealId: string) => void;
 }
 
 export function PipelineBoard({
@@ -36,6 +39,9 @@ export function PipelineBoard({
   onDealMoved,
   onAddDeal,
   onEditDeal,
+  selectionMode = false,
+  selectedDealIds = new Set<string>(),
+  onToggleDealSelection,
 }: PipelineBoardProps) {
   const { defaultCurrency } = useAuth();
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
@@ -68,10 +74,15 @@ export function PipelineBoard({
     : null;
 
   function handleDragStart(event: DragStartEvent) {
+    if (selectionMode) return;
     setActiveDealId(String(event.active.id));
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    if (selectionMode) {
+      setActiveDealId(null);
+      return;
+    }
     setActiveDealId(null);
     const { active, over } = event;
     if (!over) return;
@@ -119,6 +130,9 @@ export function PipelineBoard({
               currency={defaultCurrency}
               onAddDeal={onAddDeal}
               onEditDeal={onEditDeal}
+              selectionMode={selectionMode}
+              selectedDealIds={selectedDealIds}
+              onToggleDealSelection={onToggleDealSelection}
             />
           );
         })}
@@ -193,6 +207,9 @@ function StageColumn({
   currency,
   onAddDeal,
   onEditDeal,
+  selectionMode,
+  selectedDealIds,
+  onToggleDealSelection,
 }: {
   stage: PipelineStage;
   deals: Deal[];
@@ -200,6 +217,9 @@ function StageColumn({
   currency: string;
   onAddDeal: (stageId: string) => void;
   onEditDeal: (deal: Deal) => void;
+  selectionMode: boolean;
+  selectedDealIds: Set<string>;
+  onToggleDealSelection?: (dealId: string) => void;
 }) {
   const t = useTranslations("Pipelines.board");
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
@@ -248,20 +268,25 @@ function StageColumn({
               deal={deal}
               stage={stage}
               onEdit={onEditDeal}
+              selectionMode={selectionMode}
+              selected={selectedDealIds.has(deal.id)}
+              onToggleSelection={onToggleDealSelection}
             />
           ))
         )}
       </div>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => onAddDeal(stage.id)}
-        className="mt-3 w-full justify-start border border-dashed border-border bg-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-      >
-        <Plus className="mr-1 h-3 w-3" />
-        {t("addDeal")}
-      </Button>
+      {!selectionMode && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onAddDeal(stage.id)}
+          className="mt-3 w-full justify-start border border-dashed border-border bg-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+        >
+          <Plus className="mr-1 h-3 w-3" />
+          {t("addDeal")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -270,13 +295,20 @@ function DraggableDealCard({
   deal,
   stage,
   onEdit,
+  selectionMode,
+  selected,
+  onToggleSelection,
 }: {
   deal: Deal;
   stage: PipelineStage;
   onEdit: (deal: Deal) => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelection?: (dealId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
+    disabled: selectionMode,
   });
 
   return (
@@ -286,7 +318,14 @@ function DraggableDealCard({
       {...attributes}
       style={{ opacity: isDragging ? 0.3 : 1, touchAction: "none" }}
     >
-      <DealCard deal={deal} stage={stage} onEdit={onEdit} />
+      <DealCard
+        deal={deal}
+        stage={stage}
+        onEdit={onEdit}
+        selectionMode={selectionMode}
+        selected={selected}
+        onToggleSelection={onToggleSelection}
+      />
     </div>
   );
 }

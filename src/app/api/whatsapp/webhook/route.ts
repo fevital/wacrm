@@ -10,6 +10,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { linkDealsToConversation } from '@/lib/deals/link-conversation'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -601,6 +602,16 @@ async function processMessage(
   )
   if (!convResult) return
   const conversation = convResult.conversation
+
+  // Keep every business card for this contact tied to the canonical
+  // WhatsApp conversation. Best-effort; messaging must not depend on
+  // the CRM deal-link update succeeding.
+  await linkDealsToConversation(
+    supabaseAdmin(),
+    accountId,
+    contactRecord.id,
+    conversation.id
+  )
 
   // Emit conversation.created as soon as the thread is opened — BEFORE
   // the reaction short-circuit below — so a conversation first opened by

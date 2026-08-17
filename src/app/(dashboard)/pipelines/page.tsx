@@ -24,12 +24,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
+import {
+  GitBranch,
+  Plus,
+  ChevronDown,
+  Settings,
+  CheckSquare2,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useCan } from "@/hooks/use-can";
 import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
 import { useTranslations } from "next-intl";
+import { linkDealsToConversation } from "@/lib/deals/link-conversation";
 
 // Pipeline creation is admin-class (settings-tier write under
 // the new RLS); deal creation is operational and only requires
@@ -70,6 +79,14 @@ export default function PipelinesPage() {
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [defaultStageId, setDefaultStageId] = useState<string>("");
 
+  // Bulk-selection state for deleting multiple deals from the current funnel.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedDealIds, setSelectedDealIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Guard against double-seeding (React StrictMode double-effect in dev).
   const seedAttempted = useRef(false);
 
@@ -104,7 +121,41 @@ export default function PipelinesPage() {
         .select("*, contact:contacts(*), assignee:profiles!deals_assigned_to_fkey(*)")
         .eq("pipeline_id", pipelineId)
         .order("created_at", { ascending: false });
-      return (data ?? []) as Deal[];
+
+      const rows = (data ?? []) as Deal[];
+      const contactIds = [
+        ...new Set(
+          rows
+            .map((deal) => deal.contact_id)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+
+      if (contactIds.length === 0) return rows;
+
+      // Migration 036 guarantees a single canonical conversation per
+      // (account, contact). Hydrate old deals that predate the automatic
+      // link so the card shows its chat immediately, even before the deal
+      // row has been touched again.
+      const { data: conversations } = await supabase
+        .from("conversations")
+        .select("id, contact_id")
+        .in("contact_id", contactIds);
+
+      const conversationByContact = new Map(
+        (conversations ?? []).map((conversation) => [
+          conversation.contact_id,
+          conversation.id,
+        ]),
+      );
+
+      return rows.map((deal) => {
+        if (!deal.contact_id) return deal;
+        const conversationId = conversationByContact.get(deal.contact_id);
+        return conversationId
+          ? { ...deal, conversation_id: conversationId }
+          : deal;
+      });
     },
     [supabase],
   );
@@ -196,6 +247,54 @@ export default function PipelinesPage() {
     };
   }, [selectedPipelineId, loadStages, loadDeals]);
 
+  // If a conversation is opened after a deal already exists, link it live.
+  // This covers inbound WhatsApp messages while the pipeline page is open;
+  // the server send/webhook paths also stamp the association, so it remains
+  // automatic outside this screen too.
+  useEffect(() => {
+    if (!selectedPipelineId || !accountId) return;
+
+    const channel = supabase
+      .channel(`pipeline-conversation-links:${selectedPipelineId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversations",
+          filter: `account_id=eq.${accountId}`,
+        },
+        (payload) => {
+          const conversation = payload.new as {
+            id?: string;
+            contact_id?: string;
+          };
+
+          if (!conversation.id || !conversation.contact_id) return;
+
+          setDeals((current) =>
+            current.map((deal) =>
+              deal.contact_id === conversation.contact_id
+                ? { ...deal, conversation_id: conversation.id }
+                : deal,
+            ),
+          );
+
+          void linkDealsToConversation(
+            supabase,
+            accountId,
+            conversation.contact_id,
+            conversation.id,
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [supabase, accountId, selectedPipelineId]);
+
   const refreshPipelines = useCallback(async () => {
     const list = await loadPipelines();
     setPipelines(list);
@@ -246,6 +345,61 @@ export default function PipelinesPage() {
     setDefaultStageId(deal.stage_id);
     setDealFormOpen(true);
   }, []);
+
+  const handleToggleDealSelection = useCallback((dealId: string) => {
+    setSelectedDealIds((current) => {
+      const next = new Set(current);
+      if (next.has(dealId)) next.delete(dealId);
+      else next.add(dealId);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectionMode = useCallback(() => {
+    if (selectionMode) {
+      setSelectedDealIds(new Set());
+      setSelectionMode(false);
+      return;
+    }
+
+    setSelectionMode(true);
+  }, [selectionMode]);
+
+  const handleToggleSelectAll = useCallback(() => {
+    setSelectedDealIds((current) =>
+      current.size === deals.length
+        ? new Set()
+        : new Set(deals.map((deal) => deal.id)),
+    );
+  }, [deals]);
+
+  async function handleBulkDeleteDeals() {
+    if (!selectedPipelineId || selectedDealIds.size === 0) return;
+
+    const ids = [...selectedDealIds];
+    setBulkDeleting(true);
+
+    const { error } = await supabase
+      .from("deals")
+      .delete()
+      .eq("pipeline_id", selectedPipelineId)
+      .in("id", ids);
+
+    setBulkDeleting(false);
+
+    if (error) {
+      toast.error("Não foi possível excluir os negócios selecionados.");
+      return;
+    }
+
+    setDeals((current) => current.filter((deal) => !selectedDealIds.has(deal.id)));
+    setSelectedDealIds(new Set());
+    setSelectionMode(false);
+    setBulkDeleteOpen(false);
+    toast.success(
+      `${ids.length} ${ids.length === 1 ? "negócio excluído" : "negócios excluídos"}.`,
+    );
+  }
 
   async function handleCreatePipeline() {
     const name = newPipelineName.trim();
@@ -341,7 +495,11 @@ export default function PipelinesPage() {
               {pipelines.map((p) => (
                 <DropdownMenuItem
                   key={p.id}
-                  onClick={() => setSelectedPipelineId(p.id)}
+                  onClick={() => {
+                    setSelectedPipelineId(p.id);
+                    setSelectionMode(false);
+                    setSelectedDealIds(new Set());
+                  }}
                   className={
                     p.id === selectedPipelineId
                       ? "text-primary"
@@ -377,10 +535,30 @@ export default function PipelinesPage() {
             <Plus className="mr-1 h-4 w-4" />
             {t("addPipeline")}
           </GatedButton>
+          {deals.length > 0 && (
+            <GatedButton
+              variant="outline"
+              canAct={canCreateDeals}
+              gateReason="manage deals"
+              onClick={handleToggleSelectionMode}
+              className={
+                selectionMode
+                  ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                  : "border-border bg-card text-foreground hover:bg-muted"
+              }
+            >
+              {selectionMode ? (
+                <X className="mr-1 h-4 w-4" />
+              ) : (
+                <CheckSquare2 className="mr-1 h-4 w-4" />
+              )}
+              {selectionMode ? "Cancelar seleção" : "Selecionar negócios"}
+            </GatedButton>
+          )}
           <GatedButton
             canAct={canCreateDeals}
             gateReason="create deals"
-            disabled={!selectedPipelineId || stages.length === 0}
+            disabled={!selectedPipelineId || stages.length === 0 || selectionMode}
             onClick={() => handleAddDeal()}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
@@ -413,12 +591,50 @@ export default function PipelinesPage() {
       ) : (
         <>
           <PipelineAnalytics stages={stages} deals={deals} />
+
+          {selectionMode && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+              <div className="text-sm text-foreground">
+                <span className="font-semibold">{selectedDealIds.size}</span>{" "}
+                {selectedDealIds.size === 1 ? "negócio selecionado" : "negócios selecionados"}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleToggleSelectAll}
+                  className="border-border bg-card text-foreground hover:bg-muted"
+                >
+                  <CheckSquare2 className="mr-1 h-4 w-4" />
+                  {selectedDealIds.size === deals.length
+                    ? "Desmarcar todos"
+                    : "Selecionar todos"}
+                </Button>
+
+                <Button
+                  size="sm"
+                  disabled={selectedDealIds.size === 0}
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  <Trash2 className="mr-1 h-4 w-4" />
+                  Excluir selecionados
+                  {selectedDealIds.size > 0 ? ` (${selectedDealIds.size})` : ""}
+                </Button>
+              </div>
+            </div>
+          )}
+
           <PipelineBoard
             stages={stages}
             deals={deals}
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
+            selectionMode={selectionMode}
+            selectedDealIds={selectedDealIds}
+            onToggleDealSelection={handleToggleDealSelection}
           />
         </>
       )}
@@ -458,6 +674,43 @@ export default function PipelinesPage() {
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {creating ? t("creating") : t("createPipelineBtn")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Deals Dialog */}
+      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <DialogContent className="sm:max-w-sm bg-popover border-border">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground">
+              Excluir negócios selecionados?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Você está prestes a excluir permanentemente{" "}
+            <span className="font-semibold text-foreground">
+              {selectedDealIds.size}
+            </span>{" "}
+            {selectedDealIds.size === 1 ? "negócio" : "negócios"} deste funil.
+            Os contatos e as conversas do WhatsApp não serão apagados.
+          </p>
+          <DialogFooter className="bg-popover/50 border-border">
+            <Button
+              variant="outline"
+              onClick={() => setBulkDeleteOpen(false)}
+              disabled={bulkDeleting}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleBulkDeleteDeals}
+              disabled={bulkDeleting || selectedDealIds.size === 0}
+              className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="mr-1 h-4 w-4" />
+              {bulkDeleting ? "Excluindo..." : "Excluir negócios"}
             </Button>
           </DialogFooter>
         </DialogContent>

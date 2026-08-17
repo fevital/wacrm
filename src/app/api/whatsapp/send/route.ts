@@ -11,6 +11,7 @@ import {
   validateSendMessageParams,
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
+import { linkDealsToConversation } from '@/lib/deals/link-conversation'
 
 // The dashboard's outbound-send endpoint. It owns auth, per-user rate
 // limiting, and the two ways the UI targets a thread — an existing
@@ -93,11 +94,12 @@ export async function POST(request: Request) {
     // contact so a business-initiated template send (Contact detail view)
     // reuses the shared send core below.
     let conversationId: string | null = null
+    let resolvedContactId: string | null = null
 
     if (conversationIdInput) {
       const { data, error: convError } = await supabase
         .from('conversations')
-        .select('id')
+        .select('id, contact_id')
         .eq('id', conversationIdInput)
         .eq('account_id', accountId)
         .single()
@@ -109,6 +111,7 @@ export async function POST(request: Request) {
         )
       }
       conversationId = data.id
+      resolvedContactId = data.contact_id
     } else {
       // contact_id path: verify the contact is in this account first so a
       // caller can't open a conversation against someone else's contact.
@@ -139,12 +142,22 @@ export async function POST(request: Request) {
         )
       }
       conversationId = resolved
+      resolvedContactId = contact_id
     }
 
     if (!conversationId) {
       return NextResponse.json(
         { error: 'Conversation not found' },
         { status: 404 }
+      )
+    }
+
+    if (resolvedContactId) {
+      await linkDealsToConversation(
+        supabase,
+        accountId,
+        resolvedContactId,
+        conversationId
       )
     }
 
