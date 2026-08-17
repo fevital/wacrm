@@ -25,24 +25,39 @@ export default function NewBroadcastPage() {
   const router = useRouter();
   const t = useTranslations('Broadcasts.new');
   const { accountId } = useAuth();
-  const { createAndSendBroadcast, isProcessing, progress } = useBroadcastSending();
+  const { createAndSendBroadcast, isProcessing, progress } =
+    useBroadcastSending();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [template, setTemplate] = useState<MessageTemplate | null>(null);
   const [audience, setAudience] = useState<{
-    type: 'all' | 'tags' | 'custom_field' | 'csv';
+    type: 'all' | 'tags' | 'pipeline_stage' | 'custom_field' | 'csv';
     tagIds?: string[];
+    pipelineId?: string;
+    stageId?: string;
     customField?: {
       fieldId: string;
       operator: 'is' | 'is_not' | 'contains';
       value: string;
     };
-    csvContacts?: { phone: string; name?: string }[];
+    csvContacts?: {
+      phone: string;
+      name?: string;
+      fields?: Record<string, string>;
+    }[];
     excludeTagIds?: string[];
   }>({ type: 'all' });
+
   const [variables, setVariables] = useState<
-Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value: string }>
+    Record<
+      string,
+      {
+        type: 'static' | 'field' | 'custom_field' | 'csv_field';
+        value: string;
+      }
+    >
   >({});
+
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
 
@@ -56,6 +71,8 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
         audience: {
           type: audience.type,
           tagIds: audience.tagIds,
+          pipelineId: audience.pipelineId,
+          stageId: audience.stageId,
           customField: audience.customField,
           csvContacts: audience.csvContacts,
           excludeTagIds: audience.excludeTagIds,
@@ -63,39 +80,35 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
         variables,
         headerMediaUrl,
       });
+
       router.push(`/broadcasts/${broadcastId}`);
-    } catch (err) {
-      // Previously swallowed with console.error — the wizard would
-      // just no-op, leaving the user confused. Surface the reason.
-      const message = err instanceof Error ? err.message : 'Broadcast failed';
-      console.error('Broadcast failed:', err);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Broadcast failed';
+
+      console.error('Broadcast failed:', error);
       toast.error(message);
     }
   }
 
-  /**
-   * Writes a draft broadcast row — no recipients, no sending. The user
-   * can revisit it via the list page to finish the flow later. We
-   * don't persist the in-progress audience/variable config here
-   * because the current schema doesn't carry it past `audience_filter`
-   * and `template_variables`; those are enough for the user to
-   * recognize the draft but not to exactly round-trip into the wizard.
-   * A full resume-draft UX is a future polish.
-   */
   async function handleSaveDraft() {
     if (!template || !name.trim()) {
       toast.error(t('toastGiveName'));
       return;
     }
+
     const supabase = createClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
+
     const user = session?.user;
+
     if (!user) {
       toast.error(t('toastNotSignedIn'));
       return;
     }
+
     if (!accountId) {
       toast.error(t('toastNotLinked'));
       return;
@@ -111,6 +124,10 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
       audience_filter: {
         type: audience.type,
         tagIds: audience.tagIds,
+        pipelineId: audience.pipelineId,
+        stageId: audience.stageId,
+        customField: audience.customField,
+        excludeTagIds: audience.excludeTagIds,
       },
       status: 'draft',
       total_recipients: 0,
@@ -125,21 +142,22 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
       toast.error(t('toastFailedDraft', { error: error.message }));
       return;
     }
+
     toast.success(t('toastDraftSaved'));
     router.push('/broadcasts');
   }
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
-      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
+        <h1 className="text-2xl font-bold text-foreground">
+          {t('title')}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {t('subtitle')}
         </p>
       </div>
 
-      {/* Step Indicator */}
       <div className="flex items-center justify-between">
         {steps.map((step, index) => {
           const isActive = index === currentStep;
@@ -157,16 +175,26 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
                         : 'border border-border bg-muted text-muted-foreground'
                   }`}
                 >
-                  {isCompleted ? <Check className="h-4 w-4" /> : index + 1}
+                  {isCompleted ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    index + 1
+                  )}
                 </div>
+
                 <span
                   className={`hidden text-sm font-medium sm:block ${
-                    isActive ? 'text-foreground' : isCompleted ? 'text-primary' : 'text-muted-foreground'
+                    isActive
+                      ? 'text-foreground'
+                      : isCompleted
+                        ? 'text-primary'
+                        : 'text-muted-foreground'
                   }`}
                 >
                   {t(`steps.${step.label}`)}
                 </span>
               </div>
+
               {index < steps.length - 1 && (
                 <div
                   className={`mx-3 h-px flex-1 ${
@@ -179,7 +207,6 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
         })}
       </div>
 
-      {/* Step Content */}
       <div className="relative min-h-[400px]">
         <div
           className="transition-all duration-300 ease-in-out"
@@ -196,6 +223,7 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
               onBack={() => router.push('/broadcasts')}
             />
           )}
+
           {currentStep === 1 && (
             <Step2SelectAudience
               audience={audience}
@@ -204,6 +232,7 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
               onBack={() => setCurrentStep(0)}
             />
           )}
+
           {currentStep === 2 && template && (
             <Step3Personalize
               template={template}
@@ -216,6 +245,7 @@ Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_field'; value:
               onBack={() => setCurrentStep(1)}
             />
           )}
+
           {currentStep === 3 && template && (
             <Step4ScheduleSend
               name={name}
